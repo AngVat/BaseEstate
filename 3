@@ -1,0 +1,102 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+
+contract BaseEstate is ERC721, Ownable {
+    struct Property {
+        uint256 id;
+        string name;
+        string location;
+        uint256 value;
+        address owner;
+        uint256 totalRentCollected;
+    }
+
+    uint256 public propertyCounter;
+    mapping(uint256 => Property) public properties;
+    mapping(uint256 => mapping(address => uint256)) public rentalBalances;
+
+    event PropertyRegistered(uint256 id, string name, string location, uint256 value, address owner);
+    event OwnershipTransferred(uint256 id, address indexed previousOwner, address indexed newOwner);
+    event RentCollected(uint256 id, uint256 amount);
+    event RentDistributed(uint256 id, uint256 amount);
+
+    constructor() ERC721("BaseEstate", "BSE") {}
+
+    function registerProperty(string memory _name, string memory _location, uint256 _value) public onlyOwner {
+        propertyCounter++;
+        uint256 newPropertyId = propertyCounter;
+
+        properties[newPropertyId] = Property({
+            id: newPropertyId,
+            name: _name,
+            location: _location,
+            value: _value,
+            owner: msg.sender,
+            totalRentCollected: 0
+        });
+
+        _mint(msg.sender, newPropertyId);
+
+        emit PropertyRegistered(newPropertyId, _name, _location, _value, msg.sender);
+    }
+
+    function transferOwnership(uint256 _propertyId, address _newOwner) public {
+        require(ownerOf(_propertyId) == msg.sender, "You are not the owner");
+        require(_newOwner != address(0), "Invalid address");
+
+        _transfer(msg.sender, _newOwner);
+
+        properties[_propertyId].owner = _newOwner;
+
+        emit OwnershipTransferred(_propertyId, msg.sender, _newOwner);
+    }
+
+    function getProperty(uint256 _propertyId) public view returns (Property memory) {
+        return properties[_propertyId];
+    }
+
+    function collectRent(uint256 _propertyId, uint256 _amount) public onlyOwner {
+        Property storage property = properties[_propertyId];
+        property.totalRentCollected += _amount;
+
+        emit RentCollected(_propertyId, _amount);
+    }
+
+    function distributeRent(uint256 _propertyId) public onlyOwner {
+        Property storage property = properties[_propertyId];
+        uint256 totalTokens = totalSupply();
+        require(totalTokens > 0, "No tokens to distribute");
+
+        uint256 rentPerToken = property.totalRentCollected / totalTokens;
+        for (uint256 i = 1; i <= propertyCounter; i++) {
+            address tokenOwner = ownerOf(i);
+            rentalBalances[_propertyId][tokenOwner] += rentPerToken;
+        }
+        
+        property.totalRentCollected = 0;
+
+        emit RentDistributed(_propertyId, property.totalRentCollected);
+    }
+
+    function withdrawRent(uint256 _propertyId) public {
+        uint256 balance = rentalBalances[_propertyId][msg.sender];
+        require(balance > 0, "No rental balance to withdraw");
+
+        rentalBalances[_propertyId][msg.sender] = 0;
+        payable(msg.sender).transfer(balance);
+    }
+
+    function updatePropertyDetails(uint256 _propertyId, string memory _name, string memory _location, uint256 _value) public {
+        require(ownerOf(_propertyId) == msg.sender, "You are not the owner");
+        
+        Property storage property = properties[_propertyId];
+        property.name = _name;
+        property.location = _location;
+        property.value = _value;
+    }
+
+    receive() external payable {}
+}
